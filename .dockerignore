@@ -1,0 +1,18 @@
+# Не копируем модули и временные файлы
+vendor/
+*.log
+*.tmp
+
+# Git
+.git
+.gitignore
+
+# Документация и настройки IDE
+README.md
+*.md
+*.env*
+.idea/
+.vscode/
+
+# Тесты, если не нужны в билде
+**/*_test.go

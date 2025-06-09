@@ -1,3 +1,3 @@
-module github.com/whoya/subscription-manager
+module github.com/WhoYa/subscription-manager
 
 go 1.24.3
