@@ -80,4 +80,6 @@ Temporary Items
 .history
 .ionide
 
+Makefile
+
 # End of https://www.toptal.com/developers/gitignore/api/go,visualstudiocode,macos
