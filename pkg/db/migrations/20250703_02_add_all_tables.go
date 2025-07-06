@@ -1,7 +1,7 @@
 package migrations
 
 import (
-	"github.com/WhoYa/subscription-manager/db"
+	"github.com/WhoYa/subscription-manager/pkg/db"
 	"github.com/go-gormigrate/gormigrate/v2"
 	"gorm.io/gorm"
 )

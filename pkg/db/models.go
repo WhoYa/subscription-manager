@@ -24,10 +24,10 @@ type Subscription struct {
 	ServiceName  string   `gorm:"size:200"`
 	IconURL      string   `gorm:"size:800"`
 	BasePrice    float64  `gorm:"type:numeric(12,2)"`
-	BaseCurrency Currency `gorm:"type:currency_enum "`
+	BaseCurrency Currency `gorm:"type:currency_enum"`
 	IsActive     bool     `gorm:"default:true"`
 	Users        []User   `gorm:"many2many:user_subscriptions"`
-	Period       time.Time
+	PeriodDays   int      `gorm:"not null"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
@@ -38,8 +38,8 @@ type UserSubscription struct {
 	UserID         string      `gorm:"type:uuid;not null;uniqueIndex:user_sub_uq"`
 	SubscriptionID string      `gorm:"type:uuid;not null;uniqueIndex:user_sub_uq"`
 	PricingMode    PricingMode `gorm:"type:pricing_mode_enum;default:'none'"`
-	MarkupPercent  float64     `gorm:"fefault:0"`
-	FixedFee       float64     `gorm:"fefault:0"`
+	MarkupPercent  float64     `gorm:"default:0"`
+	FixedFee       float64     `gorm:"default:0"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 

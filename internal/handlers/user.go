@@ -4,7 +4,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
-	"github.com/WhoYa/subscription-manager/db"
+	"github.com/WhoYa/subscription-manager/pkg/db"
 )
 
 func Healthz(c *fiber.Ctx) error { return c.SendString("ok") }
@@ -47,7 +47,11 @@ func GetUser(dbConn *gorm.DB) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		id := c.Params("id")
 		var user db.User
-		if err := dbConn.First(&user, "id = ?", id).Error; err != nil {
+		err := dbConn.
+			Preload("Subscriptions").
+			Preload("Payments").
+			First(&user, "id = ?", id).Error
+		if err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return c.Status(404).JSON(fiber.Map{"error": "user not found"})
 			}
@@ -70,7 +74,7 @@ func UpdateUser(dbConn *gorm.DB) fiber.Handler {
 		}
 		var user db.User
 		if err := dbConn.First(&user, "id = ?", id).Error; err != nil {
-			return c.Status(404).JSON(fiber.Map{"error": "user" + id + "not found"})
+			return c.Status(404).JSON(fiber.Map{"error": "user not found"})
 		}
 		if body.Username != nil {
 			user.Username = *body.Username
@@ -94,6 +98,6 @@ func DeleteUser(dbConn *gorm.DB) fiber.Handler {
 		if err := dbConn.Delete(&db.User{}, "id = ?", id).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
-		return c.SendStatus(500)
+		return c.SendStatus(204)
 	}
 }

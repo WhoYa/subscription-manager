@@ -14,7 +14,7 @@ COPY . .
 RUN mkdir -p /app \
     && go build -o /app/submgr ./cmd/api
 
-RUN go build -o /app/healthcheck ./cmd/healthcheck
+RUN go build -o /app/healthcheck ./internal/util/healthcheck
 
 FROM scratch
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
