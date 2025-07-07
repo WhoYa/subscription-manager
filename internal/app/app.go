@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/WhoYa/subscription-manager/internal/handlers"
+	"github.com/WhoYa/subscription-manager/internal/repository/user"
 	"github.com/WhoYa/subscription-manager/pkg/db"
 	"github.com/WhoYa/subscription-manager/pkg/db/migrations"
 )
@@ -27,24 +28,19 @@ func New() *fiber.App {
 	}
 	log.Println("Migrations applied")
 
-	// Fiber + Routes
+	userRepo := user.NewUserRepo(gormDB)
+	userHandler := handlers.NewUserHandler(userRepo)
+
 	app := fiber.New()
 	app.Get("/healthz", handlers.Healthz)
-
 	api := app.Group("/api")
-	u := api.Group("/users")
-	u.Post("/", handlers.CreateUser(gormDB))
-	u.Get("/", handlers.ListUser(gormDB))
-	u.Get("/:id", handlers.GetUser(gormDB))
-	u.Patch("/:id", handlers.UpdateUser(gormDB))
-	u.Delete("/:id", handlers.DeleteUser(gormDB))
 
-	s := api.Group("/subscriptions")
-	s.Post("/", handlers.CreateSubscription(gormDB))
-	s.Get("/", handlers.ListSubscription(gormDB))
-	s.Get("/:id", handlers.GetSubscription(gormDB))
-	s.Patch("/:id", handlers.UpdateSubscription(gormDB))
-	s.Delete("/:id", handlers.DeleteSubscription(gormDB))
+	u := api.Group("/users")
+	u.Post("/", userHandler.Create)
+	u.Get("/", userHandler.List)
+	u.Get("/:id", userHandler.Get)
+	u.Patch("/:id", userHandler.Update)
+	u.Delete("/:id", userHandler.Delete)
 
 	return app
 }
