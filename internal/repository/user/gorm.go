@@ -33,7 +33,7 @@ func (r *userGormRepo) FindByID(id string) (*db.User, error) {
 	err := r.orm.
 		Preload("Subscriptions").
 		Preload("Payments").
-		First(&u, "id = ?").Error
+		First(&u, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}

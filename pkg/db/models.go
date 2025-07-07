@@ -12,7 +12,7 @@ type User struct {
 	Username      string         `gorm:"size:200"`
 	Fullname      string         `gorm:"size:200"`
 	IsAdmin       bool           `gorm:"default:false"`
-	Sybscriptions []Subscription `gorm:"many2many:user_subscriptions"`
+	Subscriptions []Subscription `gorm:"many2many:user_subscriptions"`
 	Payments      []PaymentLog
 	CreatedAt     time.Time
 	UpdatedAt     time.Time

@@ -42,7 +42,7 @@ func (h *UserHandler) Get(c *fiber.Ctx) error {
 	id := c.Params("id")
 	user, err := h.repo.FindByID(id)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(500).JSON(fiber.Map{"error": err.Error})
 	}
 	return c.JSON(user)
 }
@@ -59,7 +59,7 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 	id := c.Params("id")
 	user, err := h.repo.FindByID(id)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
+		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
 	}
 	var body struct {
 		Username *string `json:"username"`
