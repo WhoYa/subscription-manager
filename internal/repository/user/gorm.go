@@ -1,8 +1,16 @@
 package user
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/WhoYa/subscription-manager/pkg/db"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+)
+
+var (
+	ErrDuplicateTGID = errors.New("duplicate tg_id")
 )
 
 type userGormRepo struct {
@@ -14,7 +22,18 @@ func NewUserRepo(db *gorm.DB) UserRepository {
 }
 
 func (r *userGormRepo) Create(u *db.User) error {
-	return r.orm.Create(u).Error
+	err := r.orm.Create(u).Error
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			// по желанию можно ещё дополнительно проверить имя constraint:
+			if strings.Contains(pgErr.ConstraintName, "users_tg_id_key") {
+				return ErrDuplicateTGID
+			}
+			return ErrDuplicateTGID
+		}
+	}
+	return err
 }
 
 func (r *userGormRepo) List(limit, offset int) ([]db.User, error) {
@@ -38,6 +57,19 @@ func (r *userGormRepo) FindByID(id string) (*db.User, error) {
 		return nil, err
 	}
 	return &u, err
+}
+
+func (r *userGormRepo) FindByTGID(tgID int64) (*db.User, error) {
+	var u db.User
+	err := r.orm.
+		Preload("Subscriptions").
+		Preload("Payments").
+		First(&u, "tg_id = ?", tgID).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
 }
 
 func (r *userGormRepo) Update(u *db.User) error {

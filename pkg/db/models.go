@@ -76,6 +76,7 @@ type CurrencyRate struct {
 	Value     float64    `gorm:"not null"`
 	Source    RateSource `gorm:"type:ratesource_enum"`
 	FetchedAt time.Time
+	UpdatedAt time.Time
 	CreatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 }

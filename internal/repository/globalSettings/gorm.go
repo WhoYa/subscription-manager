@@ -9,7 +9,7 @@ type globalSettingsGormRepo struct {
 	orm *gorm.DB
 }
 
-func NewGlobalSettings(db *gorm.DB) GlobalSettingsRepository {
+func NewGlobalSettingsRepository(db *gorm.DB) GlobalSettingsRepository {
 	return &globalSettingsGormRepo{orm: db}
 }
 
@@ -19,4 +19,16 @@ func (r *globalSettingsGormRepo) Create(gs *db.GlobalSettings) error {
 
 func (r *globalSettingsGormRepo) Update(gs *db.GlobalSettings) error {
 	return r.orm.Save(gs).Error
+}
+
+func (r *globalSettingsGormRepo) Get() (*db.GlobalSettings, error) {
+	var gs db.GlobalSettings
+	err := r.orm.
+		Order("updated_at DESC").
+		First(&gs).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return &gs, nil
 }

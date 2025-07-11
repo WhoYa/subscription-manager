@@ -1,17 +1,21 @@
 package handlers
 
 import (
-	"github.com/WhoYa/subscription-manager/internal/repository/subscription"
-	"github.com/WhoYa/subscription-manager/pkg/db"
+	"errors"
+	"strconv"
+
+	repo "github.com/WhoYa/subscription-manager/internal/repository/subscription"
+	dbpkg "github.com/WhoYa/subscription-manager/pkg/db"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type SubscriptionHandler struct {
-	repo subscription.SubscriptionRepository
+	repo repo.SubscriptionRepository
 }
 
-func NewSubscriptionHandler(r subscription.SubscriptionRepository) *SubscriptionHandler {
+func NewSubscriptionHandler(r repo.SubscriptionRepository) *SubscriptionHandler {
 	return &SubscriptionHandler{repo: r}
 }
 
@@ -26,16 +30,21 @@ func (h *SubscriptionHandler) Create(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
 	}
 
-	curr := db.Currency(body.BaseCurrency)
+	if exist, err := h.repo.FindByServiceName(body.ServiceName); err == nil && exist != nil {
+		return c.Status(409).JSON(fiber.Map{"error": "subscription with this service_name already exists"})
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 
-	if curr != db.USD && curr != db.EUR {
+	curr := dbpkg.Currency(body.BaseCurrency)
+	if curr != dbpkg.USD && curr != dbpkg.EUR {
 		return c.Status(400).JSON(fiber.Map{"error": "unsupported currency, must be USD or EUR"})
 	}
 	if body.PeriodDays <= 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "perid_days must be > 0"})
+		return c.Status(400).JSON(fiber.Map{"error": "period_days must be > 0"})
 	}
 
-	subscription := db.Subscription{
+	s := dbpkg.Subscription{
 		ServiceName:  body.ServiceName,
 		BasePrice:    body.BasePrice,
 		BaseCurrency: curr,
@@ -43,40 +52,59 @@ func (h *SubscriptionHandler) Create(c *fiber.Ctx) error {
 		IsActive:     true,
 	}
 
-	if err := h.repo.Create(&subscription); err != nil {
+	if err := h.repo.Create(&s); err != nil {
+		if errors.Is(err, repo.ErrDuplicateServiceName) {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.Status(201).JSON(subscription)
-
+	return c.Status(201).JSON(s)
 }
 
 func (h *SubscriptionHandler) Get(c *fiber.Ctx) error {
 	id := c.Params("id")
-	subscription, err := h.repo.FindByID(id)
-	if err == gorm.ErrRecordNotFound {
-		return c.Status(404).JSON(fiber.Map{"error": "subscription not found"})
-	}
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 
+	if _, err := uuid.Parse(id); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid subscription id"})
 	}
-	return c.JSON(subscription)
+	s, err := h.repo.FindByID(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return c.Status(404).JSON(fiber.Map{"error": "subscription not found"})
+	} else if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(s)
 }
 
 func (h *SubscriptionHandler) List(c *fiber.Ctx) error {
-	subscriptions, err := h.repo.List(25, 0)
+	limit, err := strconv.Atoi(c.Query("limit", "25"))
+	if err != nil || limit <= 0 {
+		limit = 25
+	}
+	offset, err := strconv.Atoi(c.Query("offset", "0"))
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+
+	subs, err := h.repo.List(limit, offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(subscriptions)
+	return c.JSON(subs)
 }
 
 func (h *SubscriptionHandler) Update(c *fiber.Ctx) error {
 	id := c.Params("id")
-	subscription, err := h.repo.FindByID(id)
-	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+	if _, err := uuid.Parse(id); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid subscription id"})
 	}
+	s, err := h.repo.FindByID(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return c.Status(404).JSON(fiber.Map{"error": "subscription not found"})
+	} else if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
 	var body struct {
 		ServiceName  *string  `json:"service_name"`
 		IconURL      *string  `json:"icon_url"`
@@ -88,39 +116,44 @@ func (h *SubscriptionHandler) Update(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
 	}
+
 	if body.ServiceName != nil {
-		subscription.ServiceName = *body.ServiceName
+		s.ServiceName = *body.ServiceName
 	}
 	if body.IconURL != nil {
-		subscription.IconURL = *body.IconURL
+		s.IconURL = *body.IconURL
 	}
 	if body.BasePrice != nil {
-		subscription.BasePrice = *body.BasePrice
+		s.BasePrice = *body.BasePrice
 	}
 	if body.BaseCurrency != nil {
-		curr := db.Currency(*body.BaseCurrency)
-		if curr != db.USD && curr != db.EUR {
+		curr := dbpkg.Currency(*body.BaseCurrency)
+		if curr != dbpkg.USD && curr != dbpkg.EUR {
 			return c.Status(400).JSON(fiber.Map{"error": "unsupported currency"})
 		}
-		subscription.BaseCurrency = curr
+		s.BaseCurrency = curr
 	}
 	if body.IsActive != nil {
-		subscription.IsActive = *body.IsActive
+		s.IsActive = *body.IsActive
 	}
 	if body.PeriodDays != nil {
 		if *body.PeriodDays <= 0 {
 			return c.Status(400).JSON(fiber.Map{"error": "period_days must be > 0"})
 		}
-		subscription.PeriodDays = *body.PeriodDays
+		s.PeriodDays = *body.PeriodDays
 	}
-	if err := h.repo.Update(subscription); err != nil {
+
+	if err := h.repo.Update(s); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(subscription)
-
+	return c.JSON(s)
 }
+
 func (h *SubscriptionHandler) Delete(c *fiber.Ctx) error {
 	id := c.Params("id")
+	if _, err := uuid.Parse(id); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid subscription id"})
+	}
 	if err := h.repo.Delete(id); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}

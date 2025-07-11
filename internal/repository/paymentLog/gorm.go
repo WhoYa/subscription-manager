@@ -11,7 +11,7 @@ type paymentLogGormRepo struct {
 	orm *gorm.DB
 }
 
-func NewPaymentlogRepo(db *gorm.DB) PaymentLogRepository {
+func NewPaymentLogRepo(db *gorm.DB) PaymentLogRepository {
 	return &paymentLogGormRepo{orm: db}
 }
 

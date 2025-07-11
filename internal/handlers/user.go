@@ -1,18 +1,22 @@
 package handlers
 
 import (
-	"github.com/WhoYa/subscription-manager/internal/repository/user"
-	"github.com/WhoYa/subscription-manager/pkg/db"
+	"errors"
+	"strconv"
+
+	repo "github.com/WhoYa/subscription-manager/internal/repository/user"
+	dbpkg "github.com/WhoYa/subscription-manager/pkg/db"
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 func Healthz(c *fiber.Ctx) error { return c.SendString("ok") }
 
 type UserHandler struct {
-	repo user.UserRepository
+	repo repo.UserRepository
 }
 
-func NewUserHandler(r user.UserRepository) *UserHandler {
+func NewUserHandler(r repo.UserRepository) *UserHandler {
 	return &UserHandler{repo: r}
 }
 
@@ -26,29 +30,49 @@ func (h *UserHandler) Create(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
 	}
-	user := db.User{
+
+	user := dbpkg.User{
 		TGID:     body.TGID,
 		Username: body.Username,
 		Fullname: body.Fullname,
 		IsAdmin:  body.IsAdmin,
 	}
+
 	if err := h.repo.Create(&user); err != nil {
+		// репозиторий уже переводит PG-ошибку дублирования в ErrDuplicateTGID
+		if errors.Is(err, repo.ErrDuplicateTGID) {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+
 	return c.Status(201).JSON(user)
 }
 
 func (h *UserHandler) Get(c *fiber.Ctx) error {
 	id := c.Params("id")
-	user, err := h.repo.FindByID(id)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error})
+	u, err := h.repo.FindByID(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
 	}
-	return c.JSON(user)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(u)
 }
 
 func (h *UserHandler) List(c *fiber.Ctx) error {
-	users, err := h.repo.List(25, 0)
+	// дефолты
+	limit, err := strconv.Atoi(c.Query("limit", "25"))
+	if err != nil || limit <= 0 {
+		limit = 25
+	}
+	offset, err := strconv.Atoi(c.Query("offset", "0"))
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+
+	users, err := h.repo.List(limit, offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}

@@ -1,20 +1,38 @@
 package usersubscription
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/WhoYa/subscription-manager/pkg/db"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
+
+var ErrDuplicateUserSubscription = errors.New("duplicate user_subscription")
 
 type userSubscriptionGormRepo struct {
 	orm *gorm.DB
 }
 
-func NewUserSubscriptionRepo(db *gorm.DB) userSubsciptionRepository {
+func NewUserSubscriptionRepo(db *gorm.DB) UserSubscriptionRepository {
 	return &userSubscriptionGormRepo{orm: db}
 }
 
 func (r *userSubscriptionGormRepo) Create(us *db.UserSubscription) error {
-	return r.orm.Create(us).Error
+	err := r.orm.Create(us).Error
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			// проверяем название уникального индексa,
+			// скорее всего usersubscriptions_user_id_subscription_id_key
+			if strings.Contains(pgErr.ConstraintName, "user_subscriptions_user_id_subscription_id") {
+				return ErrDuplicateUserSubscription
+			}
+			return ErrDuplicateUserSubscription
+		}
+	}
+	return err
 }
 
 func (r *userSubscriptionGormRepo) FindByID(id string) (*db.UserSubscription, error) {
@@ -30,9 +48,10 @@ func (r *userSubscriptionGormRepo) FindByID(id string) (*db.UserSubscription, er
 	return &us, err
 }
 
-func (r *userSubscriptionGormRepo) FindByUser(userID string) ([]db.UserSubscription, error) {
+func (r *userSubscriptionGormRepo) FindByUser(userID string, limit, offset int) ([]db.UserSubscription, error) {
 	var list []db.UserSubscription
 	err := r.orm.
+		Preload("User").
 		Preload("Subscription").
 		Where("user_id = ?", userID).
 		Find(&list).Error
@@ -43,6 +62,7 @@ func (r *userSubscriptionGormRepo) FindBySubscription(subID string) ([]db.UserSu
 	var list []db.UserSubscription
 	err := r.orm.
 		Preload("User").
+		Preload("Subscription").
 		Where("subscription_id = ?", subID).
 		Find(&list).Error
 	return list, err
