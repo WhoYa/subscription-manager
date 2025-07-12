@@ -41,8 +41,9 @@ func (c PricingMode) Value() (driver.Value, error) {
 type RateSource string
 
 const (
-	Cifra RateSource = "Cifra" // https://cifra-bank.ru
-	FF    RateSource = "FF"    // https://bankffin.kz/ru/exchange-rates
+	Cifra  RateSource = "Cifra"  // https://cifra-bank.ru
+	FF     RateSource = "FF"     // https://bankffin.kz/ru/exchange-rates
+	Manual RateSource = "Manual" // ручной ввод админом
 )
 
 func (c *RateSource) Scan(value any) error {

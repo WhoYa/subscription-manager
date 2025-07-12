@@ -42,7 +42,7 @@ func (h *CurrencyRateHandler) Create(c *fiber.Ctx) error {
 	}
 	src := db.RateSource(body.Source)
 	switch src {
-	case db.Cifra, db.FF:
+	case db.Cifra, db.FF, db.Manual:
 	default:
 		return fiber.NewError(http.StatusBadRequest, "unsupported source")
 	}
@@ -140,7 +140,7 @@ func (h *CurrencyRateHandler) Update(c *fiber.Ctx) error {
 	}
 	if body.Source != nil {
 		src := db.RateSource(*body.Source)
-		if src != db.Cifra && src != db.FF {
+		if src != db.Cifra && src != db.FF && src != db.Manual {
 			return fiber.NewError(http.StatusBadRequest, "unsupported source")
 		}
 		existing.Source = src

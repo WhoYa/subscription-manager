@@ -51,7 +51,9 @@ type PaymentLog struct {
 	ID             string   `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	UserID         string   `gorm:"type:uuid;not null"`
 	SubscriptionID string   `gorm:"type:uuid;not null"`
-	Amount         int64    `gorm:"type:bigint"` // копейки
+	Amount         int64    `gorm:"type:bigint"` // итоговая сумма в копейках
+	BaseAmount     int64    `gorm:"type:bigint"` // базовая "чистая" сумма в копейках
+	ProfitAmount   int64    `gorm:"type:bigint"` // прибыль в копейках
 	Currency       Currency `gorm:"type:currency_enum"`
 	RateUsed       float64  `gorm:"not null"`
 	PaidAt         time.Time

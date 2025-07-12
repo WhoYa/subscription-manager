@@ -14,6 +14,8 @@ import (
 	userRepo "github.com/WhoYa/subscription-manager/internal/repository/user"
 	usRepo "github.com/WhoYa/subscription-manager/internal/repository/usersubscription"
 
+	"github.com/WhoYa/subscription-manager/internal/service"
+
 	"github.com/WhoYa/subscription-manager/pkg/db"
 	"github.com/WhoYa/subscription-manager/pkg/db/migrations"
 )
@@ -42,13 +44,20 @@ func New() *fiber.App {
 	gsRepo := gsRepo.NewGlobalSettingsRepository(gormDB)
 	crRepo := crRepo.NewCurrencyRateRepo(gormDB)
 
+	// Services ----------------------------------------------------------------
+	paymentService := service.NewService(usRepo, sRepo, crRepo, gsRepo)
+	profitService := service.NewProfitAnalytics(pRepo, uRepo, sRepo)
+
 	// Handlers ----------------------------------------------------------------
 	uH := handlers.NewUserHandler(uRepo)
 	sH := handlers.NewSubscriptionHandler(sRepo)
 	usH := handlers.NewUserSubscriptionHandler(usRepo)
-	pH := handlers.NewPaymentLogHandler(pRepo)
+	pH := handlers.NewPaymentLogHandler(pRepo, paymentService)
 	gsH := handlers.NewGlobalSettingsHandler(gsRepo)
 	crH := handlers.NewCurrencyRateHandler(crRepo)
+	calcH := handlers.NewCalculateHandler(paymentService)
+	adminH := handlers.NewAdminHandler(uRepo, crRepo)
+	profitH := handlers.NewProfitHandler(profitService, uRepo)
 
 	// Fiber + Routes ----------------------------------------------------------
 	app := fiber.New()
@@ -56,6 +65,9 @@ func New() *fiber.App {
 
 	// health
 	api.Get("/healthz", handlers.Healthz)
+
+	// calculate payment amount (for testing)
+	api.Get("/calculate/:userID/:subscriptionID", calcH.CalculatePayment)
 
 	// users
 	u := api.Group("/users")
@@ -106,6 +118,23 @@ func New() *fiber.App {
 	cr.Get("/latest/:currency", crH.Latest) // GET    /api/currency_rates/latest/USD
 	cr.Put("/:id", crH.Update)              // PUT    /api/currency_rates/:id
 	cr.Delete("/:id", crH.Delete)           // DELETE /api/currency_
+
+	// admin routes (profit analytics + currency management) --------------
+	admin := api.Group("/admin/:adminUserID")
+	admin.Use(adminH.CheckAdminAccess) // middleware для проверки admin прав
+
+	// profit analytics
+	profit := admin.Group("/profit")
+	profit.Get("/monthly/:year/:month", profitH.GetMonthlyProfit)    // GET /api/admin/:adminUserID/profit/monthly/2024/7
+	profit.Get("/users", profitH.GetUserProfitStats)                 // GET /api/admin/:adminUserID/profit/users?from=...&to=...
+	profit.Get("/subscriptions", profitH.GetSubscriptionProfitStats) // GET /api/admin/:adminUserID/profit/subscriptions?from=...&to=...
+	profit.Get("/total", profitH.GetTotalProfit)                     // GET /api/admin/:adminUserID/profit/total
+
+	// currency management
+	currency := admin.Group("/currency")
+	currency.Post("/set", adminH.SetManualRate)     // POST /api/admin/:adminUserID/currency/set
+	currency.Post("/bulk", adminH.SetMultipleRates) // POST /api/admin/:adminUserID/currency/bulk
+	currency.Get("/status", adminH.GetCurrentRates) // GET /api/admin/:adminUserID/currency/status
 
 	return app
 }

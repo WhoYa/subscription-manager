@@ -5,27 +5,32 @@ import (
 	"time"
 
 	"github.com/WhoYa/subscription-manager/internal/repository/paymentlog"
+	"github.com/WhoYa/subscription-manager/internal/service"
 	"github.com/WhoYa/subscription-manager/pkg/db"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
 type PaymentLogHandler struct {
-	repo paymentlog.PaymentLogRepository
+	repo           paymentlog.PaymentLogRepository
+	paymentService service.Service
 }
 
-func NewPaymentLogHandler(r paymentlog.PaymentLogRepository) *PaymentLogHandler {
-	return &PaymentLogHandler{repo: r}
+func NewPaymentLogHandler(r paymentlog.PaymentLogRepository, paymentService service.Service) *PaymentLogHandler {
+	return &PaymentLogHandler{
+		repo:           r,
+		paymentService: paymentService,
+	}
 }
 
 func (h *PaymentLogHandler) Create(c *fiber.Ctx) error {
 	userID := c.Params("userID")
 	var body struct {
 		SubscriptionID string  `json:"subscription_id"`
-		Amount         int64   `json:"amount"`
+		Amount         int64   `json:"amount"` // опционально - можем рассчитать автоматически
 		Currency       string  `json:"currency"`
-		RateUsed       float64 `json:"rate_used"`
-		PaidAt         string  `json:"paid_at"` // ISO8601
+		RateUsed       float64 `json:"rate_used"` // опционально - можем взять текущий
+		PaidAt         string  `json:"paid_at"`   // ISO8601
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
@@ -37,25 +42,39 @@ func (h *PaymentLogHandler) Create(c *fiber.Ctx) error {
 	}
 
 	curr := db.Currency(body.Currency)
-
 	if curr != db.USD && curr != db.EUR && curr != db.RUB {
 		return c.Status(400).JSON(fiber.Map{"error": "unsupported currency"})
 	}
 
-	if body.Amount <= 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "amount must be > 0"})
+	// Рассчитываем платеж чтобы получить базовую сумму и прибыль
+	paymentCalc, err := h.paymentService.CalculateUserPayment(userID, body.SubscriptionID, paidAt)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "failed to calculate payment: " + err.Error()})
 	}
 
-	if body.RateUsed <= 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "rate_used must be > 0"})
+	// Используем рассчитанные значения или переданные пользователем
+	finalAmount := paymentCalc.Amount // копейки
+	if body.Amount > 0 {
+		finalAmount = body.Amount // если пользователь передал свою сумму
 	}
+
+	finalRate := paymentCalc.ExchangeRate
+	if body.RateUsed > 0 {
+		finalRate = body.RateUsed // если пользователь передал свой курс
+	}
+
+	// Рассчитываем базовую сумму и прибыль в копейках
+	baseAmountKopecks := int64(paymentCalc.BaseAmount * 100)
+	profitAmountKopecks := int64(paymentCalc.ProfitAmount * 100)
 
 	pl := db.PaymentLog{
 		UserID:         userID,
 		SubscriptionID: body.SubscriptionID,
-		Amount:         body.Amount,
+		Amount:         finalAmount,
+		BaseAmount:     baseAmountKopecks,
+		ProfitAmount:   profitAmountKopecks,
 		Currency:       curr,
-		RateUsed:       body.RateUsed,
+		RateUsed:       finalRate,
 		PaidAt:         paidAt,
 	}
 
@@ -63,7 +82,6 @@ func (h *PaymentLogHandler) Create(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(201).JSON(pl)
-
 }
 
 func (h *PaymentLogHandler) Get(c *fiber.Ctx) error {

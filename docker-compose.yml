@@ -21,7 +21,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: dockerfile
     restart: always
     env_file:
       - .env
@@ -36,6 +36,19 @@ services:
       timeout: 5s
       retries: 3
       start_period: 0s
+
+  bot:
+    build:
+      context: .
+      dockerfile: dockerfile.bot
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - API_BASE_URL=http://api:8080
 
 volumes:
   db_data:

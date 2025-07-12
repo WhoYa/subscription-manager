@@ -16,7 +16,7 @@ func InitialMigration() *gormigrate.Migration {
                         CREATE TYPE currency_enum AS ENUM ('USD','EUR','RUB');
                     END IF;
                     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ratesource_enum') THEN
-                        CREATE TYPE ratesource_enum AS ENUM ('Cifra','FF');
+                        CREATE TYPE ratesource_enum AS ENUM ('Cifra','FF','Manual');
                     END IF;
                     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pricing_mode_enum') THEN
                         CREATE TYPE pricing_mode_enum AS ENUM ('none','percent','fixed');

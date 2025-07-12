@@ -4,6 +4,10 @@
 ### Go ###
 .env
 !.env.example
+.cursor
+.cursorignore
+.README.md
+
 
 ### Go ###
 # If you prefer the allow list template instead of the deny list, see community template:
