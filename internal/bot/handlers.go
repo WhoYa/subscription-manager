@@ -2,7 +2,7 @@ package bot
 
 import (
 	"fmt"
-	"strconv"
+	"log"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -15,219 +15,311 @@ import (
 // Subscription handlers
 
 // startCreateSubscription начинает процесс создания подписки
-func (b *Bot) startCreateSubscription(userID, chatID int64) {
+func (b *Bot) startCreateSubscription(userID, chatID int64, messageID int) {
 	userState := b.getUserState(userID)
 	userState.State = types.StateAwaitingSubscriptionName
 	userState.SubscriptionData = &types.SubscriptionCreateData{}
+	userState.CurrentMenuContext = "subscriptions"
+	userState.CurrentMessageID = messageID
+	userState.CurrentChatID = chatID
 
-	b.sendMessage(chatID, "📝 Создание новой подписки\n\nВведите название сервиса (например: Netflix, Spotify):")
+	keyboard := keyboards.CreateProcessKeyboard("start")
+	b.editMessage(chatID, messageID, MessageSubscriptionCreateStart, &keyboard)
 }
 
 // handleSubscriptionNameInput обрабатывает ввод названия подписки
 func (b *Bot) handleSubscriptionNameInput(message *tgbotapi.Message) {
 	userState := b.getUserState(message.From.ID)
 
-	serviceName := strings.TrimSpace(message.Text)
-	if serviceName == "" {
-		b.sendMessage(message.Chat.ID, "❌ Название сервиса не может быть пустым. Попробуйте снова:")
+	log.Printf("SUBSCRIPTION_NAME: Processing input from user %d: %s", message.From.ID, message.Text)
+	log.Printf("SUBSCRIPTION_NAME: Current userState: %+v", userState)
+
+	serviceName, err := validateString(message.Text, false)
+	if err != nil {
+		log.Printf("SUBSCRIPTION_NAME: Validation failed for user %d: %v", message.From.ID, err)
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, MessageSubscriptionNameEmpty, &keyboard)
 		return
+	}
+
+	if userState.SubscriptionData == nil {
+		log.Printf("SUBSCRIPTION_NAME: SubscriptionData is nil for user %d, creating new", message.From.ID)
+		userState.SubscriptionData = &types.SubscriptionCreateData{}
 	}
 
 	userState.SubscriptionData.ServiceName = serviceName
 	userState.State = types.StateAwaitingSubscriptionPrice
 
-	b.sendMessage(message.Chat.ID, fmt.Sprintf("✅ Название: %s\n\nТеперь введите базовую стоимость (например: 9.99):", serviceName))
+	log.Printf("SUBSCRIPTION_NAME: Set service name for user %d: %s", message.From.ID, serviceName)
+	log.Printf("SUBSCRIPTION_NAME: Updated SubscriptionData: %+v", userState.SubscriptionData)
+
+	text := fmt.Sprintf(MessageSubscriptionPriceStep, serviceName)
+	keyboard := keyboards.CreateProcessKeyboard("process")
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // handleSubscriptionPriceInput обрабатывает ввод цены подписки
 func (b *Bot) handleSubscriptionPriceInput(message *tgbotapi.Message) {
 	userState := b.getUserState(message.From.ID)
 
-	priceStr := strings.TrimSpace(message.Text)
-	price, err := strconv.ParseFloat(priceStr, 64)
-	if err != nil || price <= 0 {
-		b.sendMessage(message.Chat.ID, "❌ Неверный формат цены. Введите число больше 0 (например: 9.99):")
+	log.Printf("SUBSCRIPTION_PRICE: Processing input from user %d: %s", message.From.ID, message.Text)
+	log.Printf("SUBSCRIPTION_PRICE: Current SubscriptionData: %+v", userState.SubscriptionData)
+
+	price, err := validateFloat64(message.Text, 0.01)
+	if err != nil {
+		log.Printf("SUBSCRIPTION_PRICE: Validation failed for user %d: %v", message.From.ID, err)
+		text := fmt.Sprintf(MessageSubscriptionPriceError, userState.SubscriptionData.ServiceName)
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 		return
+	}
+
+	if userState.SubscriptionData == nil {
+		log.Printf("SUBSCRIPTION_PRICE: ERROR - SubscriptionData is nil for user %d", message.From.ID)
+		userState.SubscriptionData = &types.SubscriptionCreateData{}
 	}
 
 	userState.SubscriptionData.BasePrice = price
 	userState.State = types.StateAwaitingSubscriptionCurrency
 
-	text := fmt.Sprintf("✅ Цена: %.2f\n\nВыберите валюту:", price)
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ReplyMarkup = keyboards.CurrencyKeyboard()
-	b.API.Send(msg)
-}
+	log.Printf("SUBSCRIPTION_PRICE: Set price for user %d: %.2f", message.From.ID, price)
+	log.Printf("SUBSCRIPTION_PRICE: Updated SubscriptionData: %+v", userState.SubscriptionData)
 
-// handleCurrencySelection обрабатывает выбор валюты
-func (b *Bot) handleCurrencySelection(query *tgbotapi.CallbackQuery) {
-	userState := b.getUserState(query.From.ID)
-
-	if userState.State != types.StateAwaitingSubscriptionCurrency {
-		b.sendMessage(query.Message.Chat.ID, "❌ Неожиданное действие.")
-		return
-	}
-
-	currency := strings.TrimPrefix(query.Data, "currency_")
-	userState.SubscriptionData.BaseCurrency = currency
-	userState.State = types.StateAwaitingSubscriptionPeriod
-
-	text := fmt.Sprintf("✅ Валюта: %s\n\nВведите период списания в днях (например: 30 для ежемесячной подписки):", currency)
-	b.sendMessage(query.Message.Chat.ID, text)
+	text := fmt.Sprintf(MessageSubscriptionCurrencyStep, userState.SubscriptionData.ServiceName, price)
+	keyboard := keyboards.CurrencyKeyboardWithNav()
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // handleSubscriptionPeriodInput обрабатывает ввод периода подписки
 func (b *Bot) handleSubscriptionPeriodInput(message *tgbotapi.Message) {
 	userState := b.getUserState(message.From.ID)
 
-	periodStr := strings.TrimSpace(message.Text)
-	period, err := strconv.Atoi(periodStr)
-	if err != nil || period <= 0 {
-		b.sendMessage(message.Chat.ID, "❌ Неверный формат периода. Введите целое число больше 0:")
+	log.Printf("SUBSCRIPTION_PERIOD: Processing input from user %d: %s", message.From.ID, message.Text)
+	log.Printf("SUBSCRIPTION_PERIOD: Current SubscriptionData: %+v", userState.SubscriptionData)
+
+	period, err := validateInt(message.Text, 1)
+	if err != nil {
+		log.Printf("SUBSCRIPTION_PERIOD: Validation failed for user %d: %v", message.From.ID, err)
+		text := fmt.Sprintf(MessageSubscriptionPeriodError, userState.SubscriptionData.ServiceName, userState.SubscriptionData.BasePrice, userState.SubscriptionData.BaseCurrency)
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 		return
+	}
+
+	if userState.SubscriptionData == nil {
+		log.Printf("SUBSCRIPTION_PERIOD: ERROR - SubscriptionData is nil for user %d", message.From.ID)
+		userState.SubscriptionData = &types.SubscriptionCreateData{}
 	}
 
 	userState.SubscriptionData.PeriodDays = period
 
+	log.Printf("SUBSCRIPTION_PERIOD: Set period for user %d: %d days", message.From.ID, period)
+	log.Printf("SUBSCRIPTION_PERIOD: Final SubscriptionData: %+v", userState.SubscriptionData)
+
 	// Показываем итоговую информацию и просим подтверждения
 	data := userState.SubscriptionData
-	text := fmt.Sprintf(`
-📝 Подтверждение создания подписки:
+	text := fmt.Sprintf(MessageSubscriptionConfirm, data.ServiceName, data.BasePrice, data.BaseCurrency, data.PeriodDays)
 
-🏷️ Сервис: %s
-💰 Цена: %.2f %s
-📅 Период: %d дней
-
-Создать подписку?`, data.ServiceName, data.BasePrice, data.BaseCurrency, data.PeriodDays)
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ReplyMarkup = keyboards.ConfirmKeyboard("create_subscription")
-	b.API.Send(msg)
+	keyboard := keyboards.CreateConfirmKeyboard("create_subscription")
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // User handlers
 
 // startCreateUser начинает процесс создания пользователя
-func (b *Bot) startCreateUser(userID, chatID int64) {
+func (b *Bot) startCreateUser(userID, chatID int64, messageID int) {
 	userState := b.getUserState(userID)
 	userState.State = types.StateAwaitingUserFullname
 	userState.UserCreateData = &types.UserCreateData{}
+	userState.CurrentMenuContext = "users"
+	userState.CurrentMessageID = messageID
+	userState.CurrentChatID = chatID
 
-	b.sendMessage(chatID, "👤 Создание нового пользователя\n\nВведите ФИО пользователя:")
+	keyboard := keyboards.CreateProcessKeyboard("start")
+	b.editMessage(chatID, messageID, MessageUserCreateStart, &keyboard)
 }
 
 // handleUserFullnameInput обрабатывает ввод ФИО пользователя
 func (b *Bot) handleUserFullnameInput(message *tgbotapi.Message) {
 	userState := b.getUserState(message.From.ID)
 
-	fullname := strings.TrimSpace(message.Text)
-	if fullname == "" {
-		b.sendMessage(message.Chat.ID, "❌ ФИО не может быть пустым. Попробуйте снова:")
+	log.Printf("USER_FULLNAME: Processing input from user %d: %s", message.From.ID, message.Text)
+	log.Printf("USER_FULLNAME: Current userState: %+v", userState)
+
+	fullname, err := validateString(message.Text, false)
+	if err != nil {
+		log.Printf("USER_FULLNAME: Validation failed for user %d: %v", message.From.ID, err)
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, MessageUserFullnameEmpty, &keyboard)
 		return
+	}
+
+	if userState.UserCreateData == nil {
+		log.Printf("USER_FULLNAME: UserCreateData is nil for user %d, creating new", message.From.ID)
+		userState.UserCreateData = &types.UserCreateData{}
 	}
 
 	userState.UserCreateData.Fullname = fullname
 	userState.State = types.StateAwaitingUserTGID
 
-	b.sendMessage(message.Chat.ID, fmt.Sprintf("✅ ФИО: %s\n\nВведите Telegram ID пользователя (числовой ID):", fullname))
+	log.Printf("USER_FULLNAME: Set fullname for user %d: %s", message.From.ID, fullname)
+	log.Printf("USER_FULLNAME: Updated UserCreateData: %+v", userState.UserCreateData)
+
+	text := fmt.Sprintf(MessageUserTGIDStep, fullname)
+	keyboard := keyboards.CreateProcessKeyboard("process")
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // handleUserTGIDInput обрабатывает ввод Telegram ID пользователя
 func (b *Bot) handleUserTGIDInput(message *tgbotapi.Message) {
 	userState := b.getUserState(message.From.ID)
 
-	tgidStr := strings.TrimSpace(message.Text)
-	tgid, err := strconv.ParseInt(tgidStr, 10, 64)
-	if err != nil || tgid <= 0 {
-		b.sendMessage(message.Chat.ID, "❌ Неверный формат Telegram ID. Введите положительное число:")
+	log.Printf("USER_TGID: Processing input from user %d: %s", message.From.ID, message.Text)
+	log.Printf("USER_TGID: Current UserCreateData: %+v", userState.UserCreateData)
+
+	tgid, err := validateInt64(message.Text, 1)
+	if err != nil {
+		log.Printf("USER_TGID: Validation failed for user %d: %v", message.From.ID, err)
+		text := fmt.Sprintf(MessageUserTGIDError, userState.UserCreateData.Fullname)
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 		return
+	}
+
+	if userState.UserCreateData == nil {
+		log.Printf("USER_TGID: ERROR - UserCreateData is nil for user %d", message.From.ID)
+		userState.UserCreateData = &types.UserCreateData{}
 	}
 
 	userState.UserCreateData.TGID = tgid
 	userState.State = types.StateAwaitingUserUsername
 
-	b.sendMessage(message.Chat.ID, fmt.Sprintf("✅ Telegram ID: %d\n\nВведите username пользователя (без @, можно оставить пустым):", tgid))
+	log.Printf("USER_TGID: Set TGID for user %d: %d", message.From.ID, tgid)
+	log.Printf("USER_TGID: Updated UserCreateData: %+v", userState.UserCreateData)
+
+	text := fmt.Sprintf(MessageUserUsernameStep, userState.UserCreateData.Fullname, tgid)
+	keyboard := keyboards.CreateProcessKeyboard("process")
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // handleUserUsernameInput обрабатывает ввод username пользователя
 func (b *Bot) handleUserUsernameInput(message *tgbotapi.Message) {
 	userState := b.getUserState(message.From.ID)
 
-	username := strings.TrimSpace(message.Text)
-	// Username может быть пустым
+	log.Printf("USER_USERNAME: Processing input from user %d: %s", message.From.ID, message.Text)
+	log.Printf("USER_USERNAME: Current UserCreateData: %+v", userState.UserCreateData)
+
+	username, _ := validateString(message.Text, true) // Username может быть пустым
+
+	if userState.UserCreateData == nil {
+		log.Printf("USER_USERNAME: ERROR - UserCreateData is nil for user %d", message.From.ID)
+		userState.UserCreateData = &types.UserCreateData{}
+	}
+
 	userState.UserCreateData.Username = username
+
+	log.Printf("USER_USERNAME: Set username for user %d: %s", message.From.ID, username)
+	log.Printf("USER_USERNAME: Final UserCreateData: %+v", userState.UserCreateData)
 
 	// Показываем итоговую информацию и просим подтверждения
 	data := userState.UserCreateData
-	usernameText := "не указан"
-	if username != "" {
-		usernameText = "@" + username
-	}
+	usernameText := formatUsername(username)
 
-	text := fmt.Sprintf(`
-👤 Подтверждение создания пользователя:
+	text := fmt.Sprintf(MessageUserConfirm, data.Fullname, data.TGID, usernameText)
 
-👤 ФИО: %s
-🆔 Telegram ID: %d
-📝 Username: %s
-
-Создать пользователя?`, data.Fullname, data.TGID, usernameText)
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ReplyMarkup = keyboards.ConfirmKeyboard("create_user")
-	b.API.Send(msg)
+	keyboard := keyboards.CreateConfirmKeyboard("create_user")
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // Global settings handlers
 
 // startEditGlobalMarkup начинает процесс редактирования глобальной надбавки
-func (b *Bot) startEditGlobalMarkup(userID, chatID int64) {
+func (b *Bot) startEditGlobalMarkup(userID, chatID int64, messageID int) {
 	userState := b.getUserState(userID)
 	userState.State = types.StateAwaitingGlobalMarkup
+	userState.CurrentMenuContext = "global_settings"
+	userState.CurrentMessageID = messageID
+	userState.CurrentChatID = chatID
 
 	// Получаем текущие настройки для отображения
 	settings, err := b.Context.APIClient.GetGlobalSettings()
-	currentMarkup := "неизвестна"
+	currentMarkup := StatusUnknown
 	if err == nil {
 		currentMarkup = fmt.Sprintf("%.2f%%", settings.GlobalMarkupPercent)
 	}
 
-	text := fmt.Sprintf(`
-📝 Изменение глобальной надбавки
+	text := fmt.Sprintf(MessageGlobalMarkupStart, currentMarkup)
 
-Текущая надбавка: %s
-
-Введите новое значение надбавки в процентах (например: 15.5):`, currentMarkup)
-
-	b.sendMessage(chatID, text)
+	keyboard := keyboards.CreateProcessKeyboard("start")
+	b.editMessage(chatID, messageID, text, &keyboard)
 }
 
 // handleGlobalMarkupInput обрабатывает ввод глобальной надбавки
 func (b *Bot) handleGlobalMarkupInput(message *tgbotapi.Message) {
-	markupStr := strings.TrimSpace(message.Text)
-	markup, err := strconv.ParseFloat(markupStr, 64)
-	if err != nil || markup < 0 {
-		b.sendMessage(message.Chat.ID, "❌ Неверный формат надбавки. Введите число больше или равное 0:")
+	userState := b.getUserState(message.From.ID)
+
+	markup, err := validateFloat64(message.Text, 0)
+	if err != nil {
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, MessageGlobalMarkupError, &keyboard)
 		return
 	}
 
-	// Обновляем глобальные настройки через API
-	req := api.UpdateGlobalSettingsRequest{
+	logInfo("GlobalMarkup", fmt.Sprintf("User input: %s, parsed value: %.2f%%", message.Text, markup))
+
+	// Сначала пытаемся обновить настройки
+	updateReq := api.UpdateGlobalSettingsRequest{
 		GlobalMarkupPercent: markup,
 	}
 
-	settings, err := b.Context.APIClient.UpdateGlobalSettings(req)
+	logInfo("GlobalMarkup", fmt.Sprintf("Sending update request: %+v", updateReq))
+
+	settings, err := b.Context.APIClient.UpdateGlobalSettings(updateReq)
 	if err != nil {
-		b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ Ошибка при сохранении настроек: %v", err))
-		return
+		logError("UpdateGlobalSettings", err)
+
+		// Если ошибка 404, значит настройки не существуют, создаем их
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			logInfo("GlobalMarkup", "Settings not found, creating new ones")
+			createReq := api.CreateGlobalSettingsRequest{
+				GlobalMarkupPercent: markup,
+			}
+
+			logInfo("GlobalMarkup", fmt.Sprintf("Sending create request: %+v", createReq))
+
+			settings, err = b.Context.APIClient.CreateGlobalSettings(createReq)
+			if err != nil {
+				logError("CreateGlobalSettings", err)
+				errorText := fmt.Sprintf(MessageError, handleAPIError(err, "CreateGlobalSettings"))
+				keyboard := keyboards.CreateSuccessKeyboard("global_settings")
+				b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, errorText, &keyboard)
+				return
+			}
+		} else {
+			errorText := fmt.Sprintf(MessageError, handleAPIError(err, "UpdateGlobalSettings"))
+			keyboard := keyboards.CreateSuccessKeyboard("global_settings")
+			b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, errorText, &keyboard)
+			return
+		}
 	}
 
 	b.setUserState(message.From.ID, types.StateIdle)
 
-	text := fmt.Sprintf("✅ Глобальная надбавка установлена: %.2f%%", settings.GlobalMarkupPercent)
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ReplyMarkup = keyboards.BackKeyboard("global_settings")
-	b.API.Send(msg)
+	// Проверяем, что settings не nil перед использованием
+	if settings != nil {
+		logInfo("GlobalMarkup", fmt.Sprintf("Settings saved successfully. Returned value: %.2f%%", settings.GlobalMarkupPercent))
+		text := fmt.Sprintf(MessageGlobalMarkupSet, settings.GlobalMarkupPercent)
+		logInfo("GlobalMarkup", fmt.Sprintf("Showing confirmation with value: %.2f%%", settings.GlobalMarkupPercent))
+		keyboard := keyboards.CreateSuccessKeyboard("global_settings")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
+	} else {
+		logError("GlobalMarkup", fmt.Errorf("settings is nil"))
+		// Показываем сообщение с введенным значением, если нет данных от сервера
+		text := fmt.Sprintf(MessageGlobalMarkupSetWithNote, markup)
+		logInfo("GlobalMarkup", fmt.Sprintf("Showing confirmation with input value: %.2f%%", markup))
+		keyboard := keyboards.CreateSuccessKeyboard("global_settings")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
+	}
 }
 
 // General handlers
@@ -248,13 +340,18 @@ func (b *Bot) handleConfirmation(query *tgbotapi.CallbackQuery) {
 }
 
 // confirmCreateSubscription подтверждает создание подписки
-func (b *Bot) confirmCreateSubscription(userID, chatID int64, userState *types.UserData) {
+func (b *Bot) confirmCreateSubscription(userID, _ int64, userState *types.UserData) {
+	log.Printf("User %d confirming subscription creation", userID)
+
 	if userState.SubscriptionData == nil {
-		b.sendMessage(chatID, "❌ Данные для создания подписки не найдены.")
+		log.Printf("ERROR: SubscriptionData is nil for user %d", userID)
+		keyboard := keyboards.CreateSuccessKeyboard("manage_subscriptions")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, MessageDataNotFound, &keyboard)
 		return
 	}
 
 	data := userState.SubscriptionData
+	log.Printf("Subscription data for user %d: %+v", userID, data)
 
 	// Создаем подписку через API
 	req := api.CreateSubscriptionRequest{
@@ -264,32 +361,41 @@ func (b *Bot) confirmCreateSubscription(userID, chatID int64, userState *types.U
 		PeriodDays:   data.PeriodDays,
 	}
 
+	log.Printf("Creating subscription request: %+v", req)
+
 	subscription, err := b.Context.APIClient.CreateSubscription(req)
 	if err != nil {
-		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка при создании подписки: %v", err))
+		log.Printf("ERROR: Failed to create subscription for user %d: %v", userID, err)
+		errorText := fmt.Sprintf(MessageSubscriptionCreateError, handleAPIError(err, "CreateSubscription"))
+		keyboard := keyboards.CreateSuccessKeyboard("manage_subscriptions")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, errorText, &keyboard)
 		return
 	}
 
-	text := fmt.Sprintf("✅ Подписка '%s' успешно создана!\n\n💰 Цена: %.2f %s\n📅 Период: %d дней\n🆔 ID: %s",
-		subscription.ServiceName, subscription.BasePrice, subscription.BaseCurrency, subscription.PeriodDays, subscription.ID)
+	log.Printf("Subscription created successfully: %+v", subscription)
+
+	text := fmt.Sprintf(MessageSubscriptionCreated, subscription.ServiceName, subscription.BasePrice, subscription.BaseCurrency, subscription.PeriodDays, subscription.ID)
 
 	// Сбрасываем состояние
-	userState.State = types.StateIdle
-	userState.SubscriptionData = nil
+	b.resetUserState(userID)
 
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = keyboards.BackKeyboard("manage_subscriptions")
-	b.API.Send(msg)
+	keyboard := keyboards.CreateSuccessKeyboard("manage_subscriptions")
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // confirmCreateUser подтверждает создание пользователя
-func (b *Bot) confirmCreateUser(userID, chatID int64, userState *types.UserData) {
+func (b *Bot) confirmCreateUser(userID, _ int64, userState *types.UserData) {
+	log.Printf("User %d confirming user creation", userID)
+
 	if userState.UserCreateData == nil {
-		b.sendMessage(chatID, "❌ Данные для создания пользователя не найдены.")
+		log.Printf("ERROR: UserCreateData is nil for user %d", userID)
+		keyboard := keyboards.CreateSuccessKeyboard("manage_users")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, MessageDataNotFound, &keyboard)
 		return
 	}
 
 	data := userState.UserCreateData
+	log.Printf("User create data for user %d: %+v", userID, data)
 
 	// Создаем пользователя через API
 	req := api.CreateUserRequest{
@@ -299,37 +405,108 @@ func (b *Bot) confirmCreateUser(userID, chatID int64, userState *types.UserData)
 		IsAdmin:  false, // По умолчанию не админ
 	}
 
+	log.Printf("Creating user request: %+v", req)
+
 	user, err := b.Context.APIClient.CreateUser(req)
 	if err != nil {
-		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка при создании пользователя: %v", err))
+		log.Printf("ERROR: Failed to create user for user %d: %v", userID, err)
+		errorText := fmt.Sprintf(MessageUserCreateError, handleAPIError(err, "CreateUser"))
+		keyboard := keyboards.CreateSuccessKeyboard("manage_users")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, errorText, &keyboard)
 		return
 	}
 
-	usernameText := "не указан"
-	if user.Username != "" {
-		usernameText = "@" + user.Username
-	}
+	log.Printf("User created successfully: %+v", user)
 
-	text := fmt.Sprintf("✅ Пользователь успешно создан!\n\n👤 ФИО: %s\n🆔 Telegram ID: %d\n📝 Username: %s\n🆔 ID: %s",
-		user.Fullname, user.TGID, usernameText, user.ID)
+	usernameText := formatUsername(user.Username)
+
+	text := fmt.Sprintf(MessageUserCreated, user.Fullname, user.TGID, usernameText, user.ID)
 
 	// Сбрасываем состояние
-	userState.State = types.StateIdle
-	userState.UserCreateData = nil
+	b.resetUserState(userID)
 
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = keyboards.BackKeyboard("manage_users")
-	b.API.Send(msg)
+	keyboard := keyboards.CreateSuccessKeyboard("manage_users")
+	b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
 }
 
 // cancelCurrentOperation отменяет текущую операцию
 func (b *Bot) cancelCurrentOperation(userID, chatID int64) {
 	userState := b.getUserState(userID)
+	menuContext := userState.CurrentMenuContext
+
+	// Сбрасываем состояние
 	userState.State = types.StateIdle
 	userState.SubscriptionData = nil
 	userState.UserCreateData = nil
 	userState.CurrentEntityID = ""
 
-	b.sendMessage(chatID, "❌ Операция отменена.")
-	b.showMainMenu(chatID)
+	// Возвращаемся в соответствующее меню в зависимости от контекста
+	if userState.CurrentMessageID != 0 {
+		switch menuContext {
+		case "subscriptions":
+			b.showSubscriptionManagementEdit(userState.CurrentChatID, userState.CurrentMessageID)
+		case "users":
+			b.showUserManagementEdit(userState.CurrentChatID, userState.CurrentMessageID)
+		case "global_settings":
+			b.showGlobalSettingsEdit(userState.CurrentChatID, userState.CurrentMessageID)
+		default:
+			b.showMainMenuEdit(userState.CurrentChatID, userState.CurrentMessageID, userID)
+		}
+	} else {
+		// Если нет сохраненного messageID, отправляем новое сообщение
+		// (это не должно происходить в нормальном процессе)
+		switch menuContext {
+		case "subscriptions":
+			b.showSubscriptionManagement(chatID)
+		case "users":
+			b.showUserManagement(chatID)
+		case "global_settings":
+			b.showGlobalSettings(chatID)
+		default:
+			b.showMainMenu(chatID, userID)
+		}
+	}
+}
+
+// handleStepBack обрабатывает возвращение на шаг назад
+func (b *Bot) handleStepBack(userID, chatID int64) {
+	userState := b.getUserState(userID)
+
+	switch userState.State {
+	// Создание подписки
+	case types.StateAwaitingSubscriptionPrice:
+		userState.State = types.StateAwaitingSubscriptionName
+		text := "📝 Создание новой подписки\n\n**Шаг 1/4:** Введите название сервиса\n\n*Например: Netflix, Spotify*"
+		keyboard := keyboards.CreateProcessKeyboard("start")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
+
+	case types.StateAwaitingSubscriptionCurrency:
+		userState.State = types.StateAwaitingSubscriptionPrice
+		text := fmt.Sprintf("📝 Создание новой подписки\n\n**Шаг 2/4:** Введите базовую стоимость\n\n✅ Название: %s\n\n*Например: 9.99*", userState.SubscriptionData.ServiceName)
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
+
+	case types.StateAwaitingSubscriptionPeriod:
+		userState.State = types.StateAwaitingSubscriptionCurrency
+		text := fmt.Sprintf("📝 Создание новой подписки\n\n**Шаг 3/4:** Выберите валюту\n\n✅ Название: %s\n✅ Цена: %.2f", userState.SubscriptionData.ServiceName, userState.SubscriptionData.BasePrice)
+		keyboard := keyboards.CurrencyKeyboardWithNav()
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
+
+	// Создание пользователя
+	case types.StateAwaitingUserTGID:
+		userState.State = types.StateAwaitingUserFullname
+		text := "👤 Создание нового пользователя\n\n**Шаг 1/3:** Введите ФИО пользователя\n\n*Например: Иван Петров*"
+		keyboard := keyboards.CreateProcessKeyboard("start")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
+
+	case types.StateAwaitingUserUsername:
+		userState.State = types.StateAwaitingUserTGID
+		text := fmt.Sprintf("👤 Создание нового пользователя\n\n**Шаг 2/3:** Введите Telegram ID пользователя\n\n✅ ФИО: %s\n\n*Например: 123456789*", userState.UserCreateData.Fullname)
+		keyboard := keyboards.CreateProcessKeyboard("process")
+		b.editMessage(userState.CurrentChatID, userState.CurrentMessageID, text, &keyboard)
+
+	default:
+		// Если не можем вернуться назад, отменяем операцию
+		b.cancelCurrentOperation(userID, chatID)
+	}
 }

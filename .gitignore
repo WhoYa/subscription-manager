@@ -4,9 +4,6 @@
 ### Go ###
 .env
 !.env.example
-.cursor
-.cursorignore
-.README.md
 
 
 ### Go ###
@@ -50,6 +47,8 @@ Icon
 .fseventsd
 .Spotlight-V100
 .TemporaryItems
+.cursor
+.cursorignore
 .Trashes
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
@@ -60,6 +59,7 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+guidelines.md
 
 ### macOS Patch ###
 # iCloud generated files
@@ -84,6 +84,6 @@ Temporary Items
 .history
 .ionide
 
-Makefile
+Subscription_Manager.postman_collection.json
 
 # End of https://www.toptal.com/developers/gitignore/api/go,visualstudiocode,macos

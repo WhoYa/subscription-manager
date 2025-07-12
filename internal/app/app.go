@@ -74,6 +74,7 @@ func New() *fiber.App {
 	u.Post("/", uH.Create)
 	u.Get("/", uH.List)
 	u.Get("/:id", uH.Get)
+	u.Get("/tgid/:tgid", uH.FindByTGID)
 	u.Patch("/:id", uH.Update)
 	u.Delete("/:id", uH.Delete)
 

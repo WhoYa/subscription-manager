@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"log"
 	"strconv"
 
 	repo "github.com/WhoYa/subscription-manager/internal/repository/subscription"
@@ -27,20 +28,28 @@ func (h *SubscriptionHandler) Create(c *fiber.Ctx) error {
 		PeriodDays   int     `json:"period_days"`
 	}
 	if err := c.BodyParser(&body); err != nil {
+		log.Printf("SUBSCRIPTION: Failed to parse request body: %v", err)
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
 	}
 
+	log.Printf("SUBSCRIPTION: Creating subscription request - ServiceName: %s, BasePrice: %.2f, BaseCurrency: %s, PeriodDays: %d",
+		body.ServiceName, body.BasePrice, body.BaseCurrency, body.PeriodDays)
+
 	if exist, err := h.repo.FindByServiceName(body.ServiceName); err == nil && exist != nil {
+		log.Printf("SUBSCRIPTION: Service with name '%s' already exists", body.ServiceName)
 		return c.Status(409).JSON(fiber.Map{"error": "subscription with this service_name already exists"})
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("SUBSCRIPTION: Error checking existing service: %v", err)
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	curr := dbpkg.Currency(body.BaseCurrency)
 	if curr != dbpkg.USD && curr != dbpkg.EUR {
+		log.Printf("SUBSCRIPTION: Invalid currency provided: %s", body.BaseCurrency)
 		return c.Status(400).JSON(fiber.Map{"error": "unsupported currency, must be USD or EUR"})
 	}
 	if body.PeriodDays <= 0 {
+		log.Printf("SUBSCRIPTION: Invalid period days: %d", body.PeriodDays)
 		return c.Status(400).JSON(fiber.Map{"error": "period_days must be > 0"})
 	}
 
@@ -52,12 +61,17 @@ func (h *SubscriptionHandler) Create(c *fiber.Ctx) error {
 		IsActive:     true,
 	}
 
+	log.Printf("SUBSCRIPTION: Created subscription struct: %+v", s)
+
 	if err := h.repo.Create(&s); err != nil {
+		log.Printf("SUBSCRIPTION: Failed to create subscription in database: %v", err)
 		if errors.Is(err, repo.ErrDuplicateServiceName) {
 			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+
+	log.Printf("SUBSCRIPTION: Subscription created successfully: %+v", s)
 	return c.Status(201).JSON(s)
 }
 

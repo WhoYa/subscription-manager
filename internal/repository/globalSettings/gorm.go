@@ -2,6 +2,7 @@ package globalsettings
 
 import (
 	"github.com/WhoYa/subscription-manager/pkg/db"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -14,6 +15,11 @@ func NewGlobalSettingsRepository(db *gorm.DB) GlobalSettingsRepository {
 }
 
 func (r *globalSettingsGormRepo) Create(gs *db.GlobalSettings) error {
+	// Генерируем UUID если он не установлен
+	if gs.ID == "" {
+		gs.ID = uuid.New().String()
+	}
+
 	return r.orm.Create(gs).Error
 }
 

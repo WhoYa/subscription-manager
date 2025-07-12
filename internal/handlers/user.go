@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"log"
 	"strconv"
 
 	repo "github.com/WhoYa/subscription-manager/internal/repository/user"
@@ -28,8 +29,12 @@ func (h *UserHandler) Create(c *fiber.Ctx) error {
 		IsAdmin  bool   `json:"is_admin"`
 	}
 	if err := c.BodyParser(&body); err != nil {
+		log.Printf("USER: Failed to parse request body: %v", err)
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
 	}
+
+	log.Printf("USER: Creating user request - TGID: %d, Username: %s, Fullname: %s, IsAdmin: %t",
+		body.TGID, body.Username, body.Fullname, body.IsAdmin)
 
 	user := dbpkg.User{
 		TGID:     body.TGID,
@@ -38,7 +43,10 @@ func (h *UserHandler) Create(c *fiber.Ctx) error {
 		IsAdmin:  body.IsAdmin,
 	}
 
+	log.Printf("USER: Created user struct: %+v", user)
+
 	if err := h.repo.Create(&user); err != nil {
+		log.Printf("USER: Failed to create user in database: %v", err)
 		// репозиторий уже переводит PG-ошибку дублирования в ErrDuplicateTGID
 		if errors.Is(err, repo.ErrDuplicateTGID) {
 			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
@@ -46,6 +54,7 @@ func (h *UserHandler) Create(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	log.Printf("USER: User created successfully: %+v", user)
 	return c.Status(201).JSON(user)
 }
 
@@ -114,4 +123,21 @@ func (h *UserHandler) Delete(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.SendStatus(204)
+}
+
+func (h *UserHandler) FindByTGID(c *fiber.Ctx) error {
+	tgidStr := c.Params("tgid")
+	tgid, err := strconv.ParseInt(tgidStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid tg_id"})
+	}
+
+	u, err := h.repo.FindByTGID(tgid)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(u)
 }

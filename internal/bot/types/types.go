@@ -18,14 +18,26 @@ const (
 	StateAwaitingUserTGID             UserState = "awaiting_user_tgid"
 	StateAwaitingUserUsername         UserState = "awaiting_user_username"
 	StateAwaitingGlobalMarkup         UserState = "awaiting_global_markup"
+
+	// Состояния для редактирования
+	StateEditingSubscriptionName     UserState = "editing_subscription_name"
+	StateEditingSubscriptionPrice    UserState = "editing_subscription_price"
+	StateEditingSubscriptionCurrency UserState = "editing_subscription_currency"
+	StateEditingSubscriptionPeriod   UserState = "editing_subscription_period"
+	StateEditingUserFullname         UserState = "editing_user_fullname"
+	StateEditingUserUsername         UserState = "editing_user_username"
 )
 
 // UserData содержит временные данные для создания/редактирования
 type UserData struct {
-	State            UserState
-	SubscriptionData *SubscriptionCreateData
-	UserCreateData   *UserCreateData
-	CurrentEntityID  string // ID редактируемой сущности
+	State              UserState
+	SubscriptionData   *SubscriptionCreateData
+	UserCreateData     *UserCreateData
+	EditData           *EditData
+	CurrentEntityID    string // ID редактируемой сущности
+	CurrentMessageID   int    // ID текущего сообщения для редактирования
+	CurrentChatID      int64  // ID чата для редактирования сообщения
+	CurrentMenuContext string // Контекст текущего меню (subscriptions, users, main)
 }
 
 // SubscriptionCreateData временные данные для создания подписки
@@ -41,6 +53,14 @@ type UserCreateData struct {
 	Fullname string
 	TGID     int64
 	Username string
+}
+
+// EditData содержит данные для редактирования
+type EditData struct {
+	EntityType     string // "user" или "subscription"
+	EntityID       string
+	OriginalEntity interface{}            // оригинальная сущность для отображения
+	UpdatedFields  map[string]interface{} // обновленные поля
 }
 
 // BotContext содержит контекст бота и API клиенты

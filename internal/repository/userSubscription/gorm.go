@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/WhoYa/subscription-manager/pkg/db"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
@@ -20,6 +21,11 @@ func NewUserSubscriptionRepo(db *gorm.DB) UserSubscriptionRepository {
 }
 
 func (r *userSubscriptionGormRepo) Create(us *db.UserSubscription) error {
+	// Генерируем UUID если он не установлен
+	if us.ID == "" {
+		us.ID = uuid.New().String()
+	}
+
 	err := r.orm.Create(us).Error
 	if err != nil {
 		var pgErr *pgconn.PgError

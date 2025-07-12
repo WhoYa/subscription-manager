@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/WhoYa/subscription-manager/pkg/db"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -16,6 +17,11 @@ func NewPaymentLogRepo(db *gorm.DB) PaymentLogRepository {
 }
 
 func (r *paymentLogGormRepo) Create(us *db.PaymentLog) error {
+	// Генерируем UUID если он не установлен
+	if us.ID == "" {
+		us.ID = uuid.New().String()
+	}
+
 	return r.orm.Create(us).Error
 }
 

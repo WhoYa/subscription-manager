@@ -2,6 +2,7 @@ package currencyrate
 
 import (
 	"github.com/WhoYa/subscription-manager/pkg/db"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -12,6 +13,11 @@ func NewCurrencyRateRepo(db *gorm.DB) CurrencyRateRepository {
 }
 
 func (r *currencyRateGormRepo) Create(cr *db.CurrencyRate) error {
+	// Генерируем UUID если он не установлен
+	if cr.ID == "" {
+		cr.ID = uuid.New().String()
+	}
+
 	return r.orm.Create(cr).Error
 }
 
